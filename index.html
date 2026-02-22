@@ -8,6 +8,7 @@
 body { font-family: Arial; padding: 10px; }
 textarea { width: 100%; height: 80px; }
 button { width: 100%; padding: 8px; margin-top: 5px; }
+#status { margin-top:10px; color:red; }
 </style>
 </head>
 <body>
@@ -15,69 +16,72 @@ button { width: 100%; padding: 8px; margin-top: 5px; }
 <h3>AI Excel</h3>
 <textarea id="prompt" placeholder="Nhập yêu cầu..."></textarea>
 <button onclick="runAI()">Thực hiện</button>
+<div id="status"></div>
 
 <script>
-
 async function runAI() {
+  const status = document.getElementById("status");
+  status.innerText = "Đang xử lý...";
+
   const prompt = document.getElementById("prompt").value;
 
-  if (!prompt) {
-    alert("Vui lòng nhập yêu cầu");
-    return;
-  }
-
-  await Excel.run(async (context) => {
-    const sheet = context.workbook.worksheets.getActiveWorksheet();
-
-    let currentData = "";
-    try {
+  try {
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getActiveWorksheet();
       const usedRange = sheet.getUsedRange();
-      usedRange.load("values");
-      await context.sync();
-      currentData = JSON.stringify(usedRange.values);
-    } catch {
-      currentData = "";
-    }
+      let currentData = "";
 
-    // 🔐 GỌI BACKEND CỦA BẠN (KHÔNG GỌI OPENAI TRỰC TIẾP)
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        prompt: prompt,
-        currentData: currentData
-      })
+      if (usedRange) {
+        usedRange.load("values");
+        await context.sync();
+        currentData = JSON.stringify(usedRange.values);
+      }
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          prompt: prompt,
+          currentData: currentData
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Lỗi server: " + response.status);
+      }
+
+      const data = await response.json();
+
+      console.log("Response từ server:", data);
+
+      const result = data.result;
+
+      if (!result.headers || !result.rows) {
+        throw new Error("AI trả dữ liệu sai format");
+      }
+
+      sheet.getUsedRange()?.clear();
+
+      sheet.getRangeByIndexes(0, 0, 1, result.headers.length)
+           .values = [result.headers];
+
+      sheet.getRangeByIndexes(1, 0, result.rows.length, result.headers.length)
+           .values = result.rows;
+
+      await context.sync();
     });
 
-    const data = await response.json();
+    status.innerText = "Hoàn thành ✅";
+    status.style.color = "green";
 
-    if (!data.choices) {
-      alert("Lỗi từ server");
-      return;
-    }
-
-    const aiMessage = data.choices[0].message.content;
-    const result = JSON.parse(aiMessage);
-
-    // Xóa sheet cũ
-    try {
-      sheet.getUsedRange().clear();
-    } catch {}
-
-    // Ghi header
-    sheet.getRangeByIndexes(0, 0, 1, result.headers.length)
-         .values = [result.headers];
-
-    // Ghi rows
-    sheet.getRangeByIndexes(1, 0, result.rows.length, result.headers.length)
-         .values = result.rows;
-
-    await context.sync();
-  });
+  } catch (error) {
+    console.error(error);
+    status.innerText = "Lỗi: " + error.message;
+    status.style.color = "red";
+  }
 }
-
 </script>
 
 </body>
