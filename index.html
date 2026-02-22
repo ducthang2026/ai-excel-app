@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AI Excel</title>
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<style>
+body { font-family: Arial; padding: 10px; }
+textarea { width: 100%; height: 80px; }
+button { width: 100%; padding: 8px; margin-top: 5px; }
+</style>
+</head>
+<body>
+
+<h3>AI Excel</h3>
+<textarea id="prompt" placeholder="Nhập yêu cầu..."></textarea>
+<button onclick="runAI()">Thực hiện</button>
+
+<script>
+const apiKey = "DAN_API_KEY_VAO_DAY";
+
+async function runAI() {
+  const prompt = document.getElementById("prompt").value;
+
+  await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getActiveWorksheet();
+    const usedRange = sheet.getUsedRange();
+    let currentData = "";
+
+    if (usedRange) {
+      usedRange.load("values");
+      await context.sync();
+      currentData = JSON.stringify(usedRange.values);
+    }
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + apiKey
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `
+Bạn là AI điều khiển Excel.
+Nếu sheet trống thì tạo bảng mới.
+Nếu có dữ liệu thì chỉnh sửa theo yêu cầu.
+Luôn trả về JSON dạng:
+{
+ "headers": ["cột1","cột2"],
+ "rows": [["giá trị1","giá trị2"]]
+}
+Chỉ trả JSON.
+`
+          },
+          {
+            role: "user",
+            content: "Yêu cầu: " + prompt + "\nDữ liệu hiện tại: " + currentData
+          }
+        ]
+      })
+    });
+
+    const data = await response.json();
+    const result = JSON.parse(data.choices[0].message.content);
+
+    sheet.getUsedRange()?.clear();
+
+    sheet.getRangeByIndexes(0,0,1,result.headers.length)
+         .values = [result.headers];
+
+    sheet.getRangeByIndexes(1,0,result.rows.length,result.headers.length)
+         .values = result.rows;
+
+    await context.sync();
+  });
+}
+</script>
+
+</body>
+</html>
